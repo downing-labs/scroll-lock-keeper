@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust GNU toolchain
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu
+          rustup default stable-x86_64-pc-windows-gnu
+
+      - name: Install MinGW-w64 (WinLibs)
+        run: winget install BrechtSanders.WinLibs.POSIX.UCRT -e --accept-source-agreements --accept-package-agreements
+
+      # rustc's bundled GNU linker can't fully link windows-rs raw-dylib
+      # imports (missing as.exe) -- point dlltool at the real WinLibs one.
+      # Path varies per machine/runner, so this is generated fresh here
+      # rather than relying on the .cargo/config.toml committed for local dev.
+      - name: Configure dlltool path
+        shell: pwsh
+        run: |
+          $base = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Directory -Filter "*WinLibs*" | Select-Object -First 1
+          $dlltool = Get-ChildItem -Path $base.FullName -Recurse -Filter "dlltool.exe" | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path ".cargo" | Out-Null
+          $escaped = $dlltool.FullName -replace '\\','\\\\'
+          "[target.x86_64-pc-windows-gnu]`nrustflags = [`"-C`", `"dlltool=$escaped`"]" | Set-Content ".cargo\config.toml"
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/scroll-lock-keeper.exe
