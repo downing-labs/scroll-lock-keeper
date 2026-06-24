@@ -453,6 +453,6 @@ fn main() {
 
     let app = App::build_ui(Default::default()).expect("Failed to build UI");
     scroll_lock::start(app.interval_secs.clone());
-    update_check::check_async(app.update_status.clone());
+    update_check::check_async(app.update_status.clone(), app.interval_secs.clone());
     nwg::dispatch_thread_events();
 }

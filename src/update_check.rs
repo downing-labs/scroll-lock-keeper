@@ -1,9 +1,12 @@
-// Single-shot, non-blocking GitHub release check at startup. Adapts the
-// Electron UPDATE_SYSTEM_STANDARD pattern for a native app: no banner UI
-// (there's barely a UI to put one in), result surfaces in the Help dialog
-// when it's opened. Silent failure on any network/parse issue.
+// Re-checks GitHub Releases every time the shared polling interval refreshes
+// (the same interval the scroll-lock toggle uses), so a long-running
+// minimized instance eventually notices a new release without needing a
+// restart. Stops once an update is found -- no point re-checking after that.
+// Result surfaces on the main window when it's found. Silent failure on any
+// single network/parse issue -- just retries on the next interval.
 
 use serde::Deserialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -25,15 +28,19 @@ pub struct UpdateInfo {
 
 pub type UpdateStatus = Arc<Mutex<Option<UpdateInfo>>>;
 
-/// Fires the check on a background thread. Fire-and-forget -- the result
-/// lands in `status` whenever it lands; nothing waits on it.
-pub fn check_async(status: UpdateStatus) {
-    thread::spawn(move || {
+/// Spawns the polling loop on a background thread: checks immediately at
+/// startup, then re-checks every time the interval refreshes (the interval
+/// can change live via Settings). Stops once an update is found.
+pub fn check_async(status: UpdateStatus, interval_secs: Arc<AtomicU64>) {
+    thread::spawn(move || loop {
         if let Some(info) = check_once() {
             if let Ok(mut guard) = status.lock() {
                 *guard = Some(info);
             }
+            break;
         }
+        let secs = interval_secs.load(Ordering::Relaxed).max(1);
+        thread::sleep(Duration::from_secs(secs));
     });
 }
 
