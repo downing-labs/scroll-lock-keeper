@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use ureq::config::Config;
+use ureq::tls::{TlsConfig, TlsProvider};
+use ureq::Agent;
 
 const OWNER: &str = "downing-labs";
 const REPO: &str = "scroll-lock-keeper";
@@ -50,15 +53,23 @@ fn check_once() -> Option<UpdateInfo> {
         OWNER, REPO
     );
 
-    // GitHub's API rejects requests with no User-Agent.
-    let mut response = ureq::get(&url)
-        .header("User-Agent", "scroll-lock-keeper-update-checker")
-        .config()
-        .timeout_global(Some(Duration::from_secs(5)))
+    // ureq's bare `ureq::get()` shortcut defaults to the Rustls provider
+    // regardless of which TLS feature is actually compiled in -- we only
+    // enabled native-tls, so that shortcut panics on the first call. An
+    // explicit Agent with the provider set is required.
+    let agent: Agent = Config::builder()
+        .tls_config(TlsConfig::builder().provider(TlsProvider::NativeTls).build())
+        .timeout_global(Some(Duration::from_secs(8)))
         .build()
-        .call()
-        .ok()?;
+        .into();
 
+    // GitHub's API rejects requests with no User-Agent.
+    let result = agent
+        .get(&url)
+        .header("User-Agent", "scroll-lock-keeper-update-checker")
+        .call();
+
+    let mut response = result.ok()?;
     let body_text: String = response.body_mut().read_to_string().ok()?;
     let body: ReleaseResponse = serde_json::from_str(&body_text).ok()?;
     let remote = body.tag_name.trim_start_matches('v');
