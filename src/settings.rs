@@ -1,5 +1,12 @@
-// Settings persistence: a flat JSON file next to the exe (portable, no
-// registry, no AppData) -- consistent with the personal-app JSON pattern.
+// Settings persistence: a small per-user JSON file under %APPDATA%.
+//
+// This deliberately does NOT live next to the exe. The app is meant to be
+// copied straight into the Windows Startup folder (no shortcut, no registry
+// entry) -- and Windows tries to "open" every file sitting in Startup at
+// logon. A settings.json next to the exe would get opened in Notepad (or
+// whatever .json is associated with) on every login. %APPDATA% is the
+// standard per-user writable location that's independent of wherever the
+// exe itself happens to be placed.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -7,6 +14,7 @@ use std::path::PathBuf;
 
 const DEFAULT_INTERVAL_SECS: u64 = 240;
 const SETTINGS_FILE: &str = "settings.json";
+const SETTINGS_DIR: &str = "ScrollLockKeeper";
 
 #[derive(Serialize, Deserialize)]
 pub struct Settings {
@@ -20,10 +28,11 @@ impl Default for Settings {
 }
 
 fn settings_path() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join(SETTINGS_FILE)))
-        .unwrap_or_else(|| PathBuf::from(SETTINGS_FILE))
+    let dir = std::env::var("APPDATA")
+        .map(|p| PathBuf::from(p).join(SETTINGS_DIR))
+        .unwrap_or_else(|_| PathBuf::from(SETTINGS_DIR));
+    let _ = fs::create_dir_all(&dir);
+    dir.join(SETTINGS_FILE)
 }
 
 pub fn load() -> Settings {
